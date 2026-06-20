@@ -3,6 +3,7 @@ tmp_apk/
 android/.gradle/
 android/build/
 android/app/build/
+.wrangler/
 *.apk
 emulator-*.png
 elements.xlsx

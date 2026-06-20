@@ -5,7 +5,9 @@
   "main": "server.js",
   "packageManager": "pnpm@10.12.1",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "cf:deploy": "wrangler deploy",
+    "cf:dev": "wrangler dev cloudflare/worker.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.0",
@@ -13,5 +15,8 @@
     "@capacitor/core": "^8.4.0",
     "localtunnel": "^2.0.2",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.21.0"
   }
 }

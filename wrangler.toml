@@ -1,0 +1,12 @@
+name = "gomoku-online"
+main = "cloudflare/worker.mjs"
+compatibility_date = "2026-06-20"
+
+[durable_objects]
+bindings = [
+  { name = "GOMOKU_LOBBY", class_name = "GomokuLobby" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GomokuLobby"]
