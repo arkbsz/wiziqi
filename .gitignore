@@ -1,0 +1,8 @@
+node_modules/
+tmp_apk/
+android/.gradle/
+android/build/
+android/app/build/
+*.apk
+emulator-*.png
+elements.xlsx

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: gomoku-online
+    runtime: node
+    plan: free
+    buildCommand: pnpm install --no-frozen-lockfile
+    startCommand: pnpm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.0

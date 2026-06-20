@@ -1,0 +1,18 @@
+﻿{
+  "name": "五子棋",
+  "short_name": "五子棋",
+  "description": "五子棋手机游戏 - 支持本地对战和联机对战",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFF5E6",
+  "theme_color": "#FF8A80",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

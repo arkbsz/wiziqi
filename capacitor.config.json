@@ -1,0 +1,16 @@
+{
+  "appId": "com.gomoku.app",
+  "appName": "\u4E94\u5B50\u68CB",
+  "webDir": "public",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1000,
+      "backgroundColor": "#1a1a2e"
+    }
+  }
+}

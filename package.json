@@ -1,0 +1,17 @@
+{
+  "name": "gomoku",
+  "version": "1.0.0",
+  "description": "Gomoku mobile game",
+  "main": "server.js",
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/cli": "^8.4.0",
+    "@capacitor/core": "^8.4.0",
+    "localtunnel": "^2.0.2",
+    "ws": "^8.18.3"
+  }
+}
