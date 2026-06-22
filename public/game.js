@@ -170,9 +170,7 @@ function showOnlineMenu() {
 }
 
 function updateServerInput() {
-  const suggested = getDefaultServerUrl() || DEFAULT_ONLINE_SERVER;
-  ui.serverUrl.value = suggested;
-  localStorage.setItem("gomoku_server_url", suggested);
+  ui.serverUrl.value = resolveOnlineServerUrl();
 }
 
 function isAndroidApp() {
@@ -844,10 +842,13 @@ function setOnlineButtonsEnabled(enabled) {
 }
 
 function saveServerUrl() {
-  const normalized = normalizeServerUrl(getDefaultServerUrl() || DEFAULT_ONLINE_SERVER);
+  const normalized = normalizeServerUrl(resolveOnlineServerUrl());
   ui.serverUrl.value = normalized;
-  localStorage.setItem("gomoku_server_url", normalized);
   return normalized;
+}
+
+function resolveOnlineServerUrl() {
+  return getDefaultServerUrl() || DEFAULT_ONLINE_SERVER;
 }
 
 function normalizeServerUrl(raw) {

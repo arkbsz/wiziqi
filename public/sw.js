@@ -1,4 +1,4 @@
-const CACHE_NAME = "gomoku-v6";
+const CACHE_NAME = "gomoku-v7";
 const ASSETS = [
   "/",
   "/index.html",
