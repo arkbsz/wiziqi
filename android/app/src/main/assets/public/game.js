@@ -3,6 +3,7 @@ const EMPTY = null;
 const BLACK = "black";
 const WHITE = "white";
 const AXIS_LABELS = "ABCDEFGHJKLMNOPQRST".split("");
+const DEFAULT_ONLINE_SERVER = "https://gomoku-online.3337987024.workers.dev";
 
 const state = {
   screen: "menu",
@@ -14,13 +15,15 @@ const state = {
   winLine: null,
   moveHistory: [],
   pendingMove: null,
-  ws: null,
   roomCode: null,
   myColor: null,
   isMyTurn: false,
   connected: false,
   wakeLock: null,
-  blockBoardUntil: 0
+  blockBoardUntil: 0,
+  roomToken: null,
+  pollTimer: null,
+  lastRoomVersion: 0
 };
 
 const ui = {};
@@ -31,7 +34,7 @@ let gridStart = 0;
 let cellSize = 0;
 let stoneRadius = 0;
 let coordPad = 0;
-let lastTapAt = 0;
+let onlineActionTimer = null;
 
 function initBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(EMPTY));
@@ -135,37 +138,9 @@ function bindTap(element, handler) {
     return;
   }
 
+  element.style.touchAction = "manipulation";
   element.addEventListener("click", (event) => {
-    const now = Date.now();
-    if (now - lastTapAt < 350) {
-      return;
-    }
-    lastTapAt = now;
     handler(event);
-  });
-
-  element.addEventListener("touchend", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const now = Date.now();
-    if (now - lastTapAt < 350) {
-      return;
-    }
-    lastTapAt = now;
-    handler(event);
-  }, { passive: false });
-
-  element.addEventListener("pointerup", (event) => {
-    if (event.pointerType === "touch") {
-      event.preventDefault();
-      event.stopPropagation();
-      const now = Date.now();
-      if (now - lastTapAt < 350) {
-        return;
-      }
-      lastTapAt = now;
-      handler(event);
-    }
   });
 }
 
@@ -189,18 +164,27 @@ function showMenu() {
 function showOnlineMenu() {
   closeOverlay();
   ui.roomCodeInput.value = "";
+  setOnlineButtonsEnabled(true);
   updateServerInput();
   showScreen("online");
 }
 
 function updateServerInput() {
-  const saved = localStorage.getItem("gomoku_server_url") || "";
-  const suggested = getDefaultServerUrl();
-  ui.serverUrl.value = saved || suggested;
+  const suggested = getDefaultServerUrl() || DEFAULT_ONLINE_SERVER;
+  ui.serverUrl.value = suggested;
+  localStorage.setItem("gomoku_server_url", suggested);
+}
+
+function isAndroidApp() {
+  try {
+    return typeof Android !== "undefined" && !!Android.getServerUrl;
+  } catch (error) {
+    return false;
+  }
 }
 
 function startLocalGame() {
-  closeSocket(false);
+  stopPolling();
   state.mode = "local";
   resetGameState();
   state.connected = false;
@@ -259,7 +243,10 @@ function updateUI() {
 
 function resizeCanvas() {
   const parent = ui.canvas.parentElement.getBoundingClientRect();
-  const size = Math.max(120, Math.floor(Math.min(parent.width, parent.height)));
+  const shell = document.getElementById("board-shell").getBoundingClientRect();
+  const maxWidth = parent.width - 2;
+  const maxHeight = Math.min(parent.height, shell.height) - 2;
+  const size = Math.max(120, Math.floor(Math.min(maxWidth, maxHeight)));
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   ui.canvas.style.width = size + "px";
@@ -268,10 +255,10 @@ function resizeCanvas() {
   ui.canvas.height = Math.floor(size * dpr);
 
   canvasSize = size;
-  coordPad = Math.max(16, size * 0.045);
-  cellSize = (size - 2 * (coordPad + 2)) / (BOARD_SIZE - 1 + 0.84);
+  coordPad = Math.max(10, size * 0.026);
+  cellSize = (size - 2 * coordPad) / (BOARD_SIZE - 1 + 0.18);
   stoneRadius = cellSize * 0.42;
-  gridStart = coordPad + stoneRadius + 2;
+  gridStart = coordPad + stoneRadius * 0.8;
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   renderBoard();
@@ -547,10 +534,19 @@ function confirmPlacement(row, col) {
   state.pendingMove = null;
 
   if (state.mode === "online") {
-    sendMessage({ type: "make_move", row, col });
-    pulseFeedback();
-    updateUI();
-    renderBoard();
+    postOnline("/api/move", {
+      code: state.roomCode,
+      token: state.roomToken,
+      row,
+      col
+    }).then(() => {
+      pulseFeedback();
+      syncRoom();
+    }).catch((error) => {
+      showToast(error.message || "落子失败");
+      updateUI();
+      renderBoard();
+    });
     return;
   }
 
@@ -693,7 +689,14 @@ function restartGame() {
   closeOverlay();
   state.pendingMove = null;
   if (state.mode === "online") {
-    sendMessage({ type: "restart" });
+    postOnline("/api/restart", {
+      code: state.roomCode,
+      token: state.roomToken
+    }).then(() => {
+      syncRoom();
+    }).catch((error) => {
+      showToast(error.message || "重开失败");
+    });
     return;
   }
   resetGameState();
@@ -707,33 +710,69 @@ function confirmLeave() {
 }
 
 function leaveOnlineFlow() {
-  if (state.mode === "online" && state.connected) {
-    sendMessage({ type: "leave_room" });
+  if (state.mode === "online" && state.roomCode && state.roomToken) {
+    postOnline("/api/leave", {
+      code: state.roomCode,
+      token: state.roomToken
+    }).catch(() => {});
   }
-  closeSocket(false);
+  stopPolling();
   state.connected = false;
   state.mode = null;
   state.roomCode = null;
+  state.roomToken = null;
   state.myColor = null;
   state.isMyTurn = false;
   state.pendingMove = null;
+  state.lastRoomVersion = 0;
   closeOverlay();
   showScreen("menu");
 }
 
-function createRoom() {
+async function createRoom() {
+  if (ui.createRoomBtn.disabled) {
+    return;
+  }
+
   const url = saveServerUrl();
   if (!url) {
     showToast("请先输入服务器地址");
     return;
   }
 
-  openSocket(url, () => {
-    sendMessage({ type: "create_room" });
-  });
+  setOnlineButtonsEnabled(false);
+  ui.createRoomBtn.textContent = "连接中";
+  showToast("正在创建房间...");
+
+  try {
+    startOnlineActionTimeout("创建房间超时，请稍后重试");
+    const data = await postOnline("/api/create-room", {});
+    clearOnlineActionTimeout();
+    setOnlineButtonsEnabled(true);
+    state.connected = true;
+    state.mode = "online";
+    state.roomCode = data.code;
+    state.roomToken = data.token;
+    state.myColor = data.player;
+    state.isMyTurn = true;
+    ui.roomCodeDisplay.textContent = data.code;
+    startPolling();
+    updateUI();
+    showScreen("waiting");
+  } catch (error) {
+    clearOnlineActionTimeout();
+    state.connected = false;
+    updateUI();
+    setOnlineButtonsEnabled(true);
+    showToast(error.message || "连接失败，请检查服务器地址");
+  }
 }
 
-function joinRoom() {
+async function joinRoom() {
+  if (ui.joinRoomBtn.disabled) {
+    return;
+  }
+
   const url = saveServerUrl();
   if (!url) {
     showToast("请先输入服务器地址");
@@ -746,16 +785,66 @@ function joinRoom() {
     return;
   }
 
-  openSocket(url, () => {
-    sendMessage({ type: "join_room", code });
-  });
+  setOnlineButtonsEnabled(false);
+  ui.joinRoomBtn.textContent = "连接中";
+  showToast("正在加入房间...");
+
+  try {
+    startOnlineActionTimeout("加入房间超时，请稍后重试");
+    const data = await postOnline("/api/join-room", { code });
+    clearOnlineActionTimeout();
+    setOnlineButtonsEnabled(true);
+    state.connected = true;
+    state.mode = "online";
+    state.roomCode = data.code;
+    state.roomToken = data.token;
+    state.myColor = data.player;
+    state.isMyTurn = false;
+    startPolling();
+    await syncRoom();
+    enterOnlineGame();
+  } catch (error) {
+    clearOnlineActionTimeout();
+    state.connected = false;
+    updateUI();
+    setOnlineButtonsEnabled(true);
+    showToast(error.message || "连接失败，请检查服务器地址");
+  }
+}
+
+function startOnlineActionTimeout(message) {
+  clearOnlineActionTimeout();
+  onlineActionTimer = setTimeout(() => {
+    onlineActionTimer = null;
+    showToast(message);
+    stopPolling();
+    state.connected = false;
+    updateUI();
+    setOnlineButtonsEnabled(true);
+  }, 9000);
+}
+
+function clearOnlineActionTimeout() {
+  if (!onlineActionTimer) {
+    return;
+  }
+  clearTimeout(onlineActionTimer);
+  onlineActionTimer = null;
+}
+
+function setOnlineButtonsEnabled(enabled) {
+  ui.createRoomBtn.disabled = !enabled;
+  ui.joinRoomBtn.disabled = !enabled;
+  ui.createRoomBtn.style.opacity = enabled ? "1" : "0.62";
+  ui.joinRoomBtn.style.opacity = enabled ? "1" : "0.62";
+  if (enabled) {
+    ui.createRoomBtn.textContent = "创建房间";
+    ui.joinRoomBtn.textContent = "加入房间";
+  }
 }
 
 function saveServerUrl() {
-  const normalized = normalizeServerUrl(ui.serverUrl.value);
-  if (!normalized) {
-    return "";
-  }
+  const normalized = normalizeServerUrl(getDefaultServerUrl() || DEFAULT_ONLINE_SERVER);
   ui.serverUrl.value = normalized;
   localStorage.setItem("gomoku_server_url", normalized);
   return normalized;
@@ -768,176 +857,160 @@ function normalizeServerUrl(raw) {
   }
 
   if (/^https?:\/\//i.test(value)) {
-    return value.replace(/^http/i, "ws");
-  }
-
-  if (/^wss?:\/\//i.test(value)) {
     return value;
   }
 
   const useSecure = !/^(localhost|127\.0\.0\.1|10\.0\.2\.2|192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(value);
-  return (useSecure ? "wss://" : "ws://") + value;
+  return (useSecure ? "https://" : "http://") + value;
 }
 
 function getDefaultServerUrl() {
   try {
     if (typeof Android !== "undefined" && Android.getServerUrl) {
-      return Android.getServerUrl() || "";
+      return Android.getServerUrl() || DEFAULT_ONLINE_SERVER;
     }
   } catch (error) {
+    return getBrowserDefaultServerUrl() || DEFAULT_ONLINE_SERVER;
+  }
+  return getBrowserDefaultServerUrl() || DEFAULT_ONLINE_SERVER;
+}
+
+function getBrowserDefaultServerUrl() {
+  if (typeof window === "undefined" || !window.location) {
     return "";
   }
+
+  const { protocol, host, hostname } = window.location;
+  if (!host) {
+    return "";
+  }
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "";
+  }
+
+  if (protocol === "https:") {
+    return "https://" + host;
+  }
+
+  if (protocol === "http:") {
+    return "http://" + host;
+  }
+
   return "";
 }
 
-function openSocket(url, onOpen) {
-  closeSocket(false);
-  showToast("正在连接服务器...");
+function stopPolling() {
+  clearOnlineActionTimeout();
+  if (!state.pollTimer) {
+    return;
+  }
+  clearTimeout(state.pollTimer);
+  state.pollTimer = null;
+}
+
+function startPolling() {
+  stopPolling();
+  state.pollTimer = setTimeout(async () => {
+    await syncRoom();
+    if (state.mode === "online" && state.roomCode && state.roomToken) {
+      startPolling();
+    }
+  }, 1000);
+}
+
+async function postOnline(path, payload) {
+  const baseUrl = saveServerUrl();
+  if (!baseUrl) {
+    throw new Error("请先输入服务器地址");
+  }
+
+  let response;
+  try {
+    response = await fetch(baseUrl + path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    throw new Error("连接失败，请检查服务器地址");
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw new Error("服务器返回无效数据");
+  }
+
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.message || "服务器请求失败");
+  }
+
+  return data;
+}
+
+async function fetchRoomState() {
+  const baseUrl = saveServerUrl();
+  const url = new URL(baseUrl + "/api/room");
+  url.searchParams.set("code", state.roomCode);
+  url.searchParams.set("token", state.roomToken);
+
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "GET",
+      cache: "no-store"
+    });
+  } catch (error) {
+    throw new Error("连接失败，请检查服务器地址");
+  }
+
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.message || "获取房间状态失败");
+  }
+  return data;
+}
+
+async function syncRoom() {
+  if (!state.roomCode || !state.roomToken) {
+    return;
+  }
 
   try {
-    const ws = new WebSocket(url);
-    state.ws = ws;
-    state.connected = false;
-    updateUI();
+    const room = await fetchRoomState();
+    state.connected = true;
+    state.board = room.board;
+    state.currentPlayer = room.currentPlayer;
+    state.isMyTurn = state.myColor === room.currentPlayer;
 
-    ws.onopen = () => {
-      if (state.ws !== ws) {
-        ws.close();
+    if (room.updatedAt !== state.lastRoomVersion) {
+      state.lastRoomVersion = room.updatedAt;
+      state.pendingMove = null;
+      state.winLine = room.winLine || null;
+      if (room.gameOver) {
+        state.gameOver = true;
+        renderBoard();
+        showGameOver(room.winner === "draw" ? null : room.winner);
         return;
       }
-      state.connected = true;
-      updateUI();
-      onOpen();
-    };
-
-    ws.onclose = () => {
-      if (state.ws === ws) {
-        state.connected = false;
-        state.ws = null;
+      if (state.screen === "waiting" && room.joined) {
+        enterOnlineGame();
+      } else {
         updateUI();
+        renderBoard();
       }
-    };
-
-    ws.onerror = () => {
-      showToast("连接失败，请检查服务器地址");
-      state.connected = false;
+    } else {
       updateUI();
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        handleMessage(JSON.parse(event.data));
-      } catch (error) {
-        showToast("收到无法解析的数据");
-      }
-    };
+    }
   } catch (error) {
-    showToast("服务器地址无效");
-  }
-}
-
-function closeSocket(sendLeave) {
-  if (!state.ws) {
-    return;
-  }
-
-  const ws = state.ws;
-  state.ws = null;
-
-  if (sendLeave && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "leave_room" }));
-  }
-
-  try {
-    ws.close();
-  } catch (error) {
-    // ignore close failures
-  }
-}
-
-function sendMessage(message) {
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-    showToast("未连接到服务器");
-    return;
-  }
-  state.ws.send(JSON.stringify(message));
-}
-
-function handleMessage(message) {
-  switch (message.type) {
-    case "room_created":
-      state.mode = "online";
-      state.roomCode = message.code;
-      state.myColor = BLACK;
-      state.isMyTurn = true;
-      ui.roomCodeDisplay.textContent = message.code;
-      showScreen("waiting");
-      break;
-
-    case "room_joined":
-      state.mode = "online";
-      state.roomCode = message.code;
-      state.myColor = WHITE;
-      state.isMyTurn = false;
-      enterOnlineGame();
-      break;
-
-    case "opponent_joined":
-      enterOnlineGame();
-      break;
-
-    case "board_state":
-      state.board = message.board;
-      state.currentPlayer = message.currentPlayer;
-      state.isMyTurn = state.myColor === state.currentPlayer;
-      updateUI();
-      renderBoard();
-      break;
-
-    case "move_made":
-      state.board[message.row][message.col] = message.player;
-      state.currentPlayer = message.currentPlayer;
-      state.lastMove = { row: message.row, col: message.col };
-      state.pendingMove = null;
-      state.isMyTurn = state.myColor === state.currentPlayer;
-      pulseFeedback();
-      updateUI();
-      renderBoard();
-      break;
-
-    case "game_over":
-      state.board[message.row][message.col] = message.player;
-      state.lastMove = { row: message.row, col: message.col };
-      state.pendingMove = null;
-      state.winLine = message.winLine || null;
-      renderBoard();
-      showGameOver(message.winner === "draw" ? null : message.winner);
-      break;
-
-    case "restarted":
-      resetGameState();
-      state.isMyTurn = state.myColor === BLACK;
-      updateUI();
-      renderBoard();
-      break;
-
-    case "opponent_disconnected":
-      state.connected = false;
-      updateUI();
-      showToast("对手断开连接");
-      break;
-
-    case "opponent_left":
-      showToast("对手已离开房间");
-      leaveOnlineFlow();
-      break;
-
-    case "error":
-      showToast(message.message || "发生错误");
-      break;
-
-    default:
-      break;
+    state.connected = false;
+    updateUI();
+    showToast(error.message || "连接失败，请检查服务器地址");
+    stopPolling();
   }
 }
 

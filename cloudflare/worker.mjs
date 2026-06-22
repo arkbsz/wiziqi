@@ -3,503 +3,336 @@ import { DurableObject } from "cloudflare:workers";
 const BOARD_SIZE = 19;
 const BLACK = "black";
 const WHITE = "white";
-const decoder = new TextDecoder();
 
 export default {
   async fetch(request, env) {
-    if (request.headers.get("Upgrade") === "websocket") {
-      const id = env.GOMOKU_LOBBY.idFromName("global");
-      const stub = env.GOMOKU_LOBBY.get(id);
-      return stub.fetch(request);
+    const url = new URL(request.url);
+
+    if (url.pathname === "/" || url.pathname === "/health") {
+      return json({
+        name: "gomoku-online",
+        status: "ok",
+        transport: "http-polling"
+      });
     }
 
-    return new Response(JSON.stringify({
-      name: "gomoku-online",
-      status: "ok",
-      transport: "durable-objects",
-      websocket: true
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store"
-      }
-    });
+    const id = env.GOMOKU_LOBBY.idFromName("global");
+    const stub = env.GOMOKU_LOBBY.get(id);
+    return stub.fetch(request);
   }
 };
 
 export class GomokuLobby extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.socketMeta = new Map();
-    this.socketById = new Map();
-    this.rooms = new Map();
-    this.ready = this.restoreState();
+    this.ctx = ctx;
+    this.env = env;
+    this.ready = this.loadState();
   }
 
-  async restoreState() {
-    const storedRooms = await this.ctx.storage.get("rooms");
-    if (storedRooms && typeof storedRooms === "object") {
-      for (const [code, room] of Object.entries(storedRooms)) {
-        this.rooms.set(code, room);
-      }
-    }
-
-    for (const ws of this.ctx.getWebSockets()) {
-      const meta = ws.deserializeAttachment() || this.createMeta();
-      if (!meta.socketId) {
-        meta.socketId = crypto.randomUUID();
-        ws.serializeAttachment(meta);
-      }
-      this.socketMeta.set(ws, meta);
-      this.socketById.set(meta.socketId, ws);
-    }
-
-    this.pruneRooms();
-    await this.persistRooms();
+  async loadState() {
+    this.rooms = (await this.ctx.storage.get("rooms")) || {};
   }
 
-  createMeta() {
-    return {
-      socketId: crypto.randomUUID(),
-      roomCode: null,
-      player: null
-    };
-  }
-
-  pruneRooms() {
-    const liveIds = new Set(this.socketById.keys());
-
-    for (const [code, room] of this.rooms.entries()) {
-      if (room.black && !liveIds.has(room.black)) {
-        room.black = null;
-      }
-      if (room.white && !liveIds.has(room.white)) {
-        room.white = null;
-      }
-      if (!room.black && !room.white) {
-        this.rooms.delete(code);
-      }
-    }
-  }
-
-  async persistRooms() {
-    const snapshot = {};
-    for (const [code, room] of this.rooms.entries()) {
-      snapshot[code] = room;
-    }
-    await this.ctx.storage.put("rooms", snapshot);
+  async saveState() {
+    await this.ctx.storage.put("rooms", this.rooms);
   }
 
   async fetch(request) {
     await this.ready;
 
-    if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("Expected WebSocket upgrade", { status: 426 });
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const method = request.method.toUpperCase();
+
+    if (method === "OPTIONS") {
+      return withCors(new Response(null, { status: 204 }));
     }
 
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-    const meta = this.createMeta();
-
-    server.serializeAttachment(meta);
-    this.ctx.acceptWebSocket(server);
-    this.socketMeta.set(server, meta);
-    this.socketById.set(meta.socketId, server);
-
-    return new Response(null, {
-      status: 101,
-      webSocket: client
-    });
-  }
-
-  async webSocketMessage(ws, message) {
-    await this.ready;
-
-    let parsed;
     try {
-      const text = typeof message === "string" ? message : decoder.decode(message);
-      parsed = JSON.parse(text);
+      if (method === "POST" && path === "/api/create-room") {
+        return withCors(await this.createRoom());
+      }
+      if (method === "POST" && path === "/api/join-room") {
+        const body = await request.json();
+        return withCors(await this.joinRoom(body));
+      }
+      if (method === "POST" && path === "/api/move") {
+        const body = await request.json();
+        return withCors(await this.makeMove(body));
+      }
+      if (method === "POST" && path === "/api/restart") {
+        const body = await request.json();
+        return withCors(await this.restartRoom(body));
+      }
+      if (method === "POST" && path === "/api/leave") {
+        const body = await request.json();
+        return withCors(await this.leaveRoom(body));
+      }
+      if (method === "GET" && path === "/api/room") {
+        return withCors(await this.getRoom(url.searchParams));
+      }
     } catch (error) {
-      this.send(ws, { type: "error", message: "无效消息" });
-      return;
+      return withCors(json({ ok: false, message: error.message || "服务器错误" }, 500));
     }
 
-    await this.handleMessage(ws, parsed);
+    return withCors(json({ ok: false, message: "Not found" }, 404));
   }
 
-  async webSocketClose(ws, code, reason) {
-    await this.ready;
-    await this.handleDisconnect(ws, "opponent_disconnected");
-    ws.close(code, reason);
-  }
-
-  async webSocketError(ws) {
-    await this.ready;
-    await this.handleDisconnect(ws, "opponent_disconnected");
-  }
-
-  async handleMessage(ws, message) {
-    const meta = this.getMeta(ws);
-    if (!meta) {
-      this.send(ws, { type: "error", message: "连接状态异常" });
-      return;
-    }
-
-    switch (message.type) {
-      case "create_room":
-        await this.createRoom(ws, meta);
-        return;
-
-      case "join_room":
-        await this.joinRoom(ws, meta, String(message.code || ""));
-        return;
-
-      case "make_move":
-        await this.makeMove(ws, meta, message);
-        return;
-
-      case "restart":
-        await this.restartRoom(meta);
-        return;
-
-      case "leave_room":
-        await this.leaveRoom(meta, "opponent_left");
-        return;
-
-      default:
-        this.send(ws, { type: "error", message: "未知操作" });
-    }
-  }
-
-  async createRoom(ws, meta) {
-    if (meta.roomCode) {
-      await this.leaveRoom(meta, "opponent_left");
-    }
-
+  async createRoom() {
     const code = this.generateCode();
-    const room = {
+    this.rooms[code] = {
       code,
-      black: meta.socketId,
-      white: null,
+      blackToken: crypto.randomUUID(),
+      whiteToken: null,
       board: emptyBoard(),
       currentPlayer: BLACK,
-      gameOver: false
+      gameOver: false,
+      winner: null,
+      winLine: null,
+      updatedAt: Date.now()
     };
+    await this.saveState();
 
-    meta.roomCode = code;
-    meta.player = BLACK;
-    this.saveMeta(ws, meta);
-    this.rooms.set(code, room);
-    await this.persistRooms();
-
-    this.send(ws, { type: "room_created", code, player: BLACK });
+    return json({
+      ok: true,
+      code,
+      player: BLACK,
+      token: this.rooms[code].blackToken
+    });
   }
 
-  async joinRoom(ws, meta, code) {
-    const room = this.rooms.get(code);
+  async joinRoom(body) {
+    const code = String(body?.code || "");
+    const room = this.rooms[code];
     if (!room) {
-      this.send(ws, { type: "error", message: "房间不存在" });
-      return;
+      return json({ ok: false, message: "房间不存在" }, 404);
+    }
+    if (room.whiteToken) {
+      return json({ ok: false, message: "房间已满" }, 409);
     }
 
-    if (room.white || !room.black) {
-      this.send(ws, { type: "error", message: "房间已满" });
-      return;
+    room.whiteToken = crypto.randomUUID();
+    room.updatedAt = Date.now();
+    await this.saveState();
+
+    return json({
+      ok: true,
+      code,
+      player: WHITE,
+      token: room.whiteToken
+    });
+  }
+
+  async getRoom(searchParams) {
+    const code = String(searchParams.get("code") || "");
+    const token = String(searchParams.get("token") || "");
+    const room = this.rooms[code];
+
+    if (!room) {
+      return json({ ok: false, message: "房间不存在" }, 404);
     }
 
-    if (meta.roomCode) {
-      await this.leaveRoom(meta, "opponent_left");
+    const player = getPlayerByToken(room, token);
+    if (!player) {
+      return json({ ok: false, message: "身份无效" }, 403);
     }
 
-    room.white = meta.socketId;
-    meta.roomCode = code;
-    meta.player = WHITE;
-    this.saveMeta(ws, meta);
-    await this.persistRooms();
-
-    this.send(ws, { type: "room_joined", code, player: WHITE });
-    this.sendToSocketId(room.black, { type: "opponent_joined" });
-    this.broadcastRoom(room, {
-      type: "board_state",
+    return json({
+      ok: true,
+      code: room.code,
       board: room.board,
-      currentPlayer: room.currentPlayer
+      currentPlayer: room.currentPlayer,
+      gameOver: room.gameOver,
+      winner: room.winner,
+      winLine: room.winLine,
+      joined: !!room.whiteToken,
+      yourPlayer: player,
+      updatedAt: room.updatedAt
     });
   }
 
-  async makeMove(ws, meta, message) {
-    const room = this.rooms.get(meta.roomCode);
+  async makeMove(body) {
+    const code = String(body?.code || "");
+    const token = String(body?.token || "");
+    const row = Number(body?.row);
+    const col = Number(body?.col);
+    const room = this.rooms[code];
+
     if (!room) {
-      this.send(ws, { type: "error", message: "房间不存在" });
-      return;
+      return json({ ok: false, message: "房间不存在" }, 404);
     }
 
+    const player = getPlayerByToken(room, token);
+    if (!player) {
+      return json({ ok: false, message: "身份无效" }, 403);
+    }
     if (room.gameOver) {
-      this.send(ws, { type: "error", message: "游戏已结束" });
-      return;
+      return json({ ok: false, message: "游戏已结束" }, 409);
+    }
+    if (room.currentPlayer !== player) {
+      return json({ ok: false, message: "还没轮到你" }, 409);
+    }
+    if (!isValidMove(room.board, row, col)) {
+      return json({ ok: false, message: "无效落子" }, 400);
     }
 
-    if (room.currentPlayer !== meta.player) {
-      this.send(ws, { type: "error", message: "还没轮到你" });
-      return;
-    }
+    room.board[row][col] = player;
+    room.updatedAt = Date.now();
 
-    const row = Number(message.row);
-    const col = Number(message.col);
-
-    if (
-      !Number.isInteger(row) ||
-      !Number.isInteger(col) ||
-      row < 0 ||
-      row >= BOARD_SIZE ||
-      col < 0 ||
-      col >= BOARD_SIZE ||
-      room.board[row][col] !== null
-    ) {
-      this.send(ws, { type: "error", message: "无效落子" });
-      return;
-    }
-
-    room.board[row][col] = meta.player;
-
-    if (checkWin(room.board, row, col, meta.player)) {
+    if (checkWin(room.board, row, col, player)) {
       room.gameOver = true;
-      await this.persistRooms();
-      this.broadcastRoom(room, {
-        type: "game_over",
-        winner: meta.player,
-        player: meta.player,
-        row,
-        col,
-        winLine: getWinLine(room.board, row, col, meta.player)
-      });
-      return;
-    }
-
-    if (isFull(room.board)) {
+      room.winner = player;
+      room.winLine = getWinLine(room.board, row, col, player);
+    } else if (isFull(room.board)) {
       room.gameOver = true;
-      await this.persistRooms();
-      this.broadcastRoom(room, {
-        type: "game_over",
-        winner: "draw",
-        player: meta.player,
-        row,
-        col
-      });
-      return;
+      room.winner = "draw";
+      room.winLine = null;
+    } else {
+      room.currentPlayer = player === BLACK ? WHITE : BLACK;
     }
 
-    room.currentPlayer = meta.player === BLACK ? WHITE : BLACK;
-    await this.persistRooms();
-    this.broadcastRoom(room, {
-      type: "move_made",
-      row,
-      col,
-      player: meta.player,
-      currentPlayer: room.currentPlayer
-    });
+    await this.saveState();
+    return json({ ok: true });
   }
 
-  async restartRoom(meta) {
-    const room = this.rooms.get(meta.roomCode);
+  async restartRoom(body) {
+    const code = String(body?.code || "");
+    const token = String(body?.token || "");
+    const room = this.rooms[code];
+
     if (!room) {
-      return;
+      return json({ ok: false, message: "房间不存在" }, 404);
+    }
+    if (!getPlayerByToken(room, token)) {
+      return json({ ok: false, message: "身份无效" }, 403);
     }
 
     room.board = emptyBoard();
     room.currentPlayer = BLACK;
     room.gameOver = false;
-    await this.persistRooms();
-    this.broadcastRoom(room, { type: "restarted" });
+    room.winner = null;
+    room.winLine = null;
+    room.updatedAt = Date.now();
+    await this.saveState();
+
+    return json({ ok: true });
   }
 
-  async leaveRoom(meta, notifyType) {
-    const room = this.rooms.get(meta.roomCode);
-    const ws = this.socketById.get(meta.socketId);
+  async leaveRoom(body) {
+    const code = String(body?.code || "");
+    const token = String(body?.token || "");
+    const room = this.rooms[code];
 
     if (!room) {
-      if (ws) {
-        meta.roomCode = null;
-        meta.player = null;
-        this.saveMeta(ws, meta);
-      }
-      return;
+      return json({ ok: true });
+    }
+    if (!getPlayerByToken(room, token)) {
+      return json({ ok: false, message: "身份无效" }, 403);
     }
 
-    const opponentId = meta.player === BLACK ? room.white : room.black;
-    if (opponentId) {
-      this.sendToSocketId(opponentId, { type: notifyType });
-      const opponentWs = this.socketById.get(opponentId);
-      const opponentMeta = opponentWs ? this.getMeta(opponentWs) : null;
-      if (opponentWs && opponentMeta) {
-        opponentMeta.roomCode = null;
-        opponentMeta.player = null;
-        this.saveMeta(opponentWs, opponentMeta);
-      }
-    }
-
-    this.rooms.delete(room.code);
-    await this.persistRooms();
-
-    if (ws) {
-      meta.roomCode = null;
-      meta.player = null;
-      this.saveMeta(ws, meta);
-    }
-  }
-
-  async handleDisconnect(ws, notifyType) {
-    const meta = this.getMeta(ws);
-    if (meta && meta.roomCode) {
-      await this.leaveRoom(meta, notifyType);
-    }
-
-    if (meta) {
-      this.socketById.delete(meta.socketId);
-    }
-    this.socketMeta.delete(ws);
-    this.pruneRooms();
-    await this.persistRooms();
-  }
-
-  getMeta(ws) {
-    return this.socketMeta.get(ws) || ws.deserializeAttachment() || null;
-  }
-
-  saveMeta(ws, meta) {
-    ws.serializeAttachment(meta);
-    this.socketMeta.set(ws, meta);
-    this.socketById.set(meta.socketId, ws);
+    delete this.rooms[code];
+    await this.saveState();
+    return json({ ok: true });
   }
 
   generateCode() {
     let code = "";
     do {
       code = String(Math.floor(1000 + Math.random() * 9000));
-    } while (this.rooms.has(code));
+    } while (this.rooms[code]);
     return code;
   }
+}
 
-  broadcastRoom(room, payload) {
-    if (room.black) {
-      this.sendToSocketId(room.black, payload);
-    }
-    if (room.white) {
-      this.sendToSocketId(room.white, payload);
-    }
-  }
-
-  sendToSocketId(socketId, payload) {
-    if (!socketId) {
-      return;
-    }
-    const ws = this.socketById.get(socketId);
-    if (!ws) {
-      return;
-    }
-    this.send(ws, payload);
-  }
-
-  send(ws, payload) {
-    try {
-      ws.send(JSON.stringify(payload));
-    } catch (error) {
-      // Ignore failed sends to closing sockets.
-    }
-  }
+function getPlayerByToken(room, token) {
+  if (token && token === room.blackToken) return BLACK;
+  if (token && token === room.whiteToken) return WHITE;
+  return null;
 }
 
 function emptyBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
 }
 
+function isValidMove(board, row, col) {
+  return (
+    Number.isInteger(row) &&
+    Number.isInteger(col) &&
+    row >= 0 &&
+    row < BOARD_SIZE &&
+    col >= 0 &&
+    col < BOARD_SIZE &&
+    board[row][col] === null
+  );
+}
+
 function isFull(board) {
-  return board.every((row) => row.every((cell) => cell !== null));
+  return board.every((line) => line.every((cell) => cell !== null));
 }
 
 function checkWin(board, row, col, player) {
-  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
-
-  for (const [dx, dy] of directions) {
-    let count = 1;
-
-    for (let step = 1; step < 5; step++) {
-      const nextRow = row + dx * step;
-      const nextCol = col + dy * step;
-      if (
-        nextRow < 0 ||
-        nextRow >= BOARD_SIZE ||
-        nextCol < 0 ||
-        nextCol >= BOARD_SIZE ||
-        board[nextRow][nextCol] !== player
-      ) {
-        break;
-      }
-      count += 1;
-    }
-
-    for (let step = 1; step < 5; step++) {
-      const nextRow = row - dx * step;
-      const nextCol = col - dy * step;
-      if (
-        nextRow < 0 ||
-        nextRow >= BOARD_SIZE ||
-        nextCol < 0 ||
-        nextCol >= BOARD_SIZE ||
-        board[nextRow][nextCol] !== player
-      ) {
-        break;
-      }
-      count += 1;
-    }
-
-    if (count >= 5) {
-      return true;
-    }
-  }
-
-  return false;
+  const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  return dirs.some(([dx, dy]) => countLine(board, row, col, player, dx, dy).length >= 5);
 }
 
 function getWinLine(board, row, col, player) {
-  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  for (const [dx, dy] of dirs) {
+    const line = countLine(board, row, col, player, dx, dy);
+    if (line.length >= 5) return line;
+  }
+  return [[row, col]];
+}
 
-  for (const [dx, dy] of directions) {
-    const cells = [[row, col]];
+function countLine(board, row, col, player, dx, dy) {
+  const cells = [[row, col]];
 
-    for (let step = 1; step < 5; step++) {
-      const nextRow = row + dx * step;
-      const nextCol = col + dy * step;
-      if (
-        nextRow < 0 ||
-        nextRow >= BOARD_SIZE ||
-        nextCol < 0 ||
-        nextCol >= BOARD_SIZE ||
-        board[nextRow][nextCol] !== player
-      ) {
-        break;
-      }
-      cells.push([nextRow, nextCol]);
-    }
-
-    for (let step = 1; step < 5; step++) {
-      const nextRow = row - dx * step;
-      const nextCol = col - dy * step;
-      if (
-        nextRow < 0 ||
-        nextRow >= BOARD_SIZE ||
-        nextCol < 0 ||
-        nextCol >= BOARD_SIZE ||
-        board[nextRow][nextCol] !== player
-      ) {
-        break;
-      }
-      cells.push([nextRow, nextCol]);
-    }
-
-    if (cells.length >= 5) {
-      return cells;
-    }
+  for (let step = 1; step < 5; step++) {
+    const r = row + dx * step;
+    const c = col + dy * step;
+    if (!sameStone(board, r, c, player)) break;
+    cells.push([r, c]);
   }
 
-  return [[row, col]];
+  for (let step = 1; step < 5; step++) {
+    const r = row - dx * step;
+    const c = col - dy * step;
+    if (!sameStone(board, r, c, player)) break;
+    cells.unshift([r, c]);
+  }
+
+  return cells;
+}
+
+function sameStone(board, row, col, player) {
+  return (
+    row >= 0 &&
+    row < BOARD_SIZE &&
+    col >= 0 &&
+    col < BOARD_SIZE &&
+    board[row][col] === player
+  );
+}
+
+function json(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    }
+  });
+}
+
+function withCors(response) {
+  const headers = new Headers(response.headers);
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }

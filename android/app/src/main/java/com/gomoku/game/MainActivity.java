@@ -5,8 +5,11 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
+import android.webkit.ConsoleMessage;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -15,6 +18,7 @@ import java.io.IOException;
 
 public class MainActivity extends Activity {
     private static final int LOCAL_PORT = 8080;
+    private static final String TAG = "GomokuApp";
 
     private WebView webView;
     private LocalServer localServer;
@@ -51,6 +55,17 @@ public class MainActivity extends Activity {
         webView.setHorizontalScrollBarEnabled(false);
         webView.addJavascriptInterface(new AndroidBridge(this), "Android");
         webView.setWebViewClient(new WebViewClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
+                Log.d(
+                    TAG,
+                    "JS " + consoleMessage.messageLevel() + ": " + consoleMessage.message() +
+                    " @" + consoleMessage.sourceId() + ":" + consoleMessage.lineNumber()
+                );
+                return true;
+            }
+        });
 
         startLocalServer();
         webView.loadUrl("http://127.0.0.1:" + LOCAL_PORT + "/index.html");
@@ -93,6 +108,6 @@ class AndroidBridge {
 
     @JavascriptInterface
     public String getServerUrl() {
-        return "ws://10.0.2.2:4000";
+        return "https://gomoku-online.3337987024.workers.dev";
     }
 }

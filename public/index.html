@@ -14,6 +14,12 @@
       --panel-border: rgba(160, 104, 58, 0.22);
       --accent: #d46a39;
       --accent-strong: #b84f23;
+      --accent-soft: #f8d1bf;
+      --mint: #d7eee5;
+      --butter: #fff2c8;
+      --paw-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23c68464' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='40' cy='50' rx='14' ry='12' fill='%23ffe8dc'/%3E%3Cellipse cx='21' cy='33' rx='7' ry='9' fill='%23ffe8dc'/%3E%3Cellipse cx='34' cy='24' rx='7' ry='9' fill='%23ffe8dc'/%3E%3Cellipse cx='46' cy='24' rx='7' ry='9' fill='%23ffe8dc'/%3E%3Cellipse cx='59' cy='33' rx='7' ry='9' fill='%23ffe8dc'/%3E%3C/g%3E%3C/svg%3E");
+      --bone-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'%3E%3Cpath d='M28 24c0-8 6-14 14-14 6 0 11 3 13 8h30c2-5 7-8 13-8 8 0 14 6 14 14 0 5-2 9-6 12 4 3 6 7 6 12 0 8-6 14-14 14-6 0-11-3-13-8H55c-2 5-7 8-13 8-8 0-14-6-14-14 0-5 2-9 6-12-4-3-6-7-6-12Z' fill='%23fff5de' stroke='%23d39d57' stroke-width='4' stroke-linejoin='round'/%3E%3C/svg%3E");
+      --spark-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Cpath d='M40 10L46 28L64 34L46 40L40 58L34 40L16 34L34 28L40 10Z' fill='%23fff1ad' stroke='%23d88c47' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E");
       --text: #402514;
       --muted: #86624f;
       --shadow: 0 14px 28px rgba(108, 67, 38, 0.16);
@@ -239,62 +245,152 @@
     }
 
     .game-screen {
-      flex-direction: column;
+      position: relative;
+      min-height: 100%;
       background:
-        linear-gradient(180deg, rgba(255, 248, 238, 0.95) 0%, rgba(246, 227, 201, 0.92) 100%);
+        linear-gradient(180deg, rgba(255, 251, 245, 0.98) 0%, rgba(245, 230, 208, 0.94) 46%, rgba(241, 217, 190, 0.95) 100%);
+      overflow: hidden;
+    }
+
+    .game-screen.active {
+      display: grid;
+      grid-template-rows: auto auto auto minmax(0, 1fr);
+    }
+
+    .game-screen::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        var(--paw-svg),
+        var(--spark-svg),
+        linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0));
+      background-repeat: no-repeat, no-repeat, no-repeat;
+      background-size: 42px 42px, 24px 24px, 100% 100%;
+      background-position: left 2px top 70px, right 4px bottom 68px, center center;
+      opacity: 0.1;
+      pointer-events: none;
+    }
+
+    .game-screen::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 56px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255, 248, 236, 0.28) 18%, rgba(255, 236, 214, 0.75) 100%),
+        url("board_bottom.jpeg") center bottom / cover no-repeat;
+      opacity: 0.08;
+      pointer-events: none;
+    }
+
+    .game-banner-shell {
+      position: relative;
+      margin: 2px 2px 0;
+      border-radius: 14px;
+      padding: 2px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,242,227,0.42));
+      border: 1px solid rgba(188, 124, 80, 0.1);
+      box-shadow:
+        0 4px 12px rgba(145, 91, 54, 0.08),
+        inset 0 1px 0 rgba(255,255,255,0.72);
+      overflow: hidden;
     }
 
     .game-banner {
       width: 100%;
-      height: 108px;
-      object-fit: contain;
+      height: 48px;
+      object-fit: cover;
+      object-position: center;
+      border-radius: 12px;
       background: rgba(255, 245, 232, 0.9);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);
+    }
+
+    .game-ribbon {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      background-repeat: no-repeat;
+      background-position: center;
+      pointer-events: none;
+      opacity: 0.95;
+    }
+
+    .game-ribbon.left {
+      left: 2px;
+      top: 5px;
+      background-image: var(--paw-svg);
+      background-size: 24px 24px;
+      transform: rotate(-12deg);
+    }
+
+    .game-ribbon.right {
+      right: 2px;
+      bottom: 4px;
+      background-image: var(--bone-svg);
+      background-size: 24px 16px;
+      transform: rotate(8deg);
     }
 
     .game-header {
-      min-height: 56px;
+      position: relative;
+      z-index: 1;
+      min-height: 36px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      padding: 8px 10px;
-      background: rgba(255, 249, 240, 0.88);
-      border-bottom: 1px solid rgba(150, 101, 61, 0.12);
+      gap: 6px;
+      margin: 2px 4px 0;
+      padding: 4px 6px;
+      border-radius: 12px;
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.88), rgba(255, 242, 227, 0.78));
+      border-bottom: 1px solid rgba(150, 101, 61, 0.08);
+      box-shadow:
+        0 4px 10px rgba(122, 78, 46, 0.06),
+        inset 0 1px 0 rgba(255,255,255,0.7);
     }
 
     .header-left,
     .header-right {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .icon-btn,
     .mini-btn {
-      min-width: 42px;
-      min-height: 42px;
-      padding: 0 12px;
-      border-radius: 14px;
+      min-width: 34px;
+      min-height: 30px;
+      padding: 0 8px;
+      border-radius: 10px;
       color: var(--text);
-      background: rgba(255, 255, 255, 0.78);
-      border: 1px solid rgba(150, 101, 61, 0.16);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,239,224,0.92));
+      border: 1px solid rgba(150, 101, 61, 0.14);
+      box-shadow: 0 3px 8px rgba(125, 84, 49, 0.06);
+      font-size: 12px;
     }
 
     .mini-btn {
-      min-width: 70px;
+      min-width: 58px;
       font-weight: 700;
-      font-size: 14px;
+      font-size: 12px;
     }
 
     .badge {
-      padding: 8px 12px;
-      border-radius: 14px;
-      background: rgba(255, 255, 255, 0.72);
-      border: 1px solid rgba(150, 101, 61, 0.14);
-      color: var(--muted);
-      font-size: 13px;
+      padding: 5px 8px;
+      border-radius: 10px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.88), rgba(255,242,232,0.74));
+      border: 1px solid rgba(150, 101, 61, 0.12);
+      color: #775342;
+      font-size: 11px;
       font-weight: 700;
       white-space: nowrap;
+      box-shadow: 0 3px 8px rgba(120, 79, 49, 0.05);
     }
 
     .badge.hidden {
@@ -309,61 +405,191 @@
       color: #b23b25;
     }
 
-    .board-shell {
-      flex: 1;
-      min-height: 0;
-      padding: 2px;
+    .game-stage {
+      position: relative;
+      z-index: 1;
+      min-height: auto;
       display: flex;
-      align-items: center;
+    }
+
+    .board-shell {
+      width: 100%;
+      padding: 0 2px;
+      display: flex;
+      align-items: flex-start;
       justify-content: center;
       animation: board-in 360ms ease;
     }
 
     .board-wrap {
+      position: relative;
       width: 100%;
-      height: 100%;
+      aspect-ratio: 1 / 1;
+      height: auto;
       display: flex;
       align-items: center;
       justify-content: center;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.4), rgba(253,236,214,0.52));
+      border: 1px solid rgba(192, 130, 82, 0.12);
+      box-shadow:
+        0 8px 18px rgba(111, 74, 46, 0.05),
+        inset 0 2px 0 rgba(255,255,255,0.78),
+        inset 0 -8px 14px rgba(222, 181, 136, 0.09);
+      overflow: hidden;
+    }
+
+    .board-wrap::before,
+    .board-wrap::after {
+      display: none;
     }
 
     #board-canvas {
+      position: relative;
+      z-index: 1;
       display: block;
       width: 100%;
       height: 100%;
       touch-action: none;
+      border-radius: 12px;
+    }
+
+    .stage-sticker {
+      display: none;
+    }
+
+    .stage-paw,
+    .stage-bone,
+    .stage-star {
+      position: absolute;
+      display: block;
+      background-repeat: no-repeat;
+      background-position: center;
+    }
+
+    .stage-paw {
+      width: 52px;
+      height: 52px;
+      background-image: var(--paw-svg);
+      background-size: 52px 52px;
+    }
+
+    .stage-bone {
+      width: 56px;
+      height: 36px;
+      background-image: var(--bone-svg);
+      background-size: 56px 36px;
+    }
+
+    .stage-star {
+      width: 34px;
+      height: 34px;
+      background-image: var(--spark-svg);
+      background-size: 34px 34px;
+    }
+
+    .stage-sticker.left .stage-paw {
+      left: 0;
+      top: 8px;
+      transform: rotate(-8deg);
+    }
+
+    .stage-sticker.left .stage-star {
+      right: 6px;
+      top: 0;
+    }
+
+    .stage-sticker.left .stage-bone {
+      left: 12px;
+      bottom: 6px;
+      transform: rotate(-12deg);
+    }
+
+    .stage-sticker.right .stage-paw {
+      right: 2px;
+      bottom: 0;
+      transform: rotate(10deg);
+    }
+
+    .stage-sticker.right .stage-star {
+      left: 6px;
+      top: 8px;
+    }
+
+    .stage-sticker.right .stage-bone {
+      right: 10px;
+      top: 42px;
+      transform: rotate(10deg);
     }
 
     .turn-bar {
-      min-height: 56px;
-      padding: 10px 14px 14px;
+      position: relative;
+      z-index: 1;
+      min-height: 34px;
+      padding: 0 4px 4px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
+    .game-floor {
+      position: relative;
+      min-height: 0;
+      background:
+        linear-gradient(180deg, rgba(255, 247, 235, 0.24) 0%, rgba(251, 235, 211, 0.62) 24%, rgba(245, 223, 194, 0.9) 100%);
+      overflow: hidden;
+    }
+
+    .game-floor::before {
+      content: "";
+      position: absolute;
+      inset: 8px 10px 0;
+      border-radius: 28px 28px 0 0;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0)),
+        url("board_bottom.jpeg") center bottom / cover no-repeat;
+      opacity: 0.38;
+    }
+
+    .game-floor::after {
+      content: "";
+      position: absolute;
+      inset: auto 18px 16px auto;
+      width: 92px;
+      height: 92px;
+      background-image: var(--paw-svg), var(--spark-svg);
+      background-repeat: no-repeat, no-repeat;
+      background-position: left bottom, right top;
+      background-size: 52px 52px, 28px 28px;
+      opacity: 0.26;
+    }
+
     .turn-chip {
-      min-width: 240px;
+      min-width: 190px;
       max-width: 100%;
-      min-height: 42px;
-      padding: 0 16px;
+      min-height: 30px;
+      padding: 0 10px;
       border-radius: 999px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
-      background: rgba(255, 249, 240, 0.94);
-      border: 1px solid rgba(150, 101, 61, 0.14);
-      box-shadow: 0 10px 20px rgba(115, 76, 48, 0.08);
+      gap: 8px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,238,219,0.92));
+      border: 1px solid rgba(150, 101, 61, 0.16);
+      box-shadow:
+        0 6px 14px rgba(115, 76, 48, 0.06),
+        inset 0 1px 0 rgba(255,255,255,0.72);
       text-align: center;
-      font-size: 14px;
+      font-size: 11px;
       font-weight: 700;
       color: var(--text);
     }
 
     .stone-dot {
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
       border-radius: 50%;
       flex: 0 0 auto;
     }
@@ -379,14 +605,15 @@
 
     .game-menu {
       position: absolute;
-      top: 60px;
-      left: 10px;
-      width: 144px;
-      padding: 8px;
+      top: 56px;
+      left: 6px;
+      width: 118px;
+      padding: 6px;
       display: none;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       z-index: 20;
+      border-radius: 14px;
     }
 
     .game-menu.show {
@@ -394,12 +621,13 @@
     }
 
     .menu-item {
-      min-height: 42px;
-      border-radius: 14px;
+      min-height: 34px;
+      border-radius: 10px;
       background: rgba(255, 255, 255, 0.92);
       color: var(--text);
       border: 1px solid rgba(150, 101, 61, 0.12);
       font-weight: 700;
+      font-size: 12px;
     }
 
     .menu-item.danger {
@@ -422,12 +650,26 @@
     }
 
     .overlay-card {
+      position: relative;
       width: min(100%, 320px);
       padding: 24px 20px 18px;
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 12px;
+      overflow: hidden;
+    }
+
+    .overlay-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: var(--spark-svg), var(--paw-svg);
+      background-repeat: no-repeat, no-repeat;
+      background-position: left 14px top 12px, right 12px bottom 16px;
+      background-size: 36px 36px, 44px 44px;
+      opacity: 0.26;
+      pointer-events: none;
     }
 
     .result-image {
@@ -504,6 +746,17 @@
         transform: scale(1);
       }
     }
+
+    @media (max-width: 390px) {
+      .game-banner {
+        height: 44px;
+      }
+
+      .game-header {
+        margin-left: 2px;
+        margin-right: 2px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -524,21 +777,17 @@
     </div>
   </section>
 
-  <section id="online-screen" class="screen online-screen">
+<section id="online-screen" class="screen online-screen">
     <div class="dialog panel">
       <h2 class="dialog-title">联机对战</h2>
-      <p class="dialog-text">输入服务器地址后创建房间，或输入 4 位房间号加入对局。</p>
+      <p class="dialog-text">已自动连接联机服务器。创建房间后把 4 位房间号发给对方即可。</p>
 
-      <label class="input-group">
-        <span class="input-label">服务器地址</span>
-        <input
-          id="server-url"
-          class="text-input"
-          type="text"
-          inputmode="url"
-          placeholder="ws://电脑IP:4000 或 wss://公网地址"
-        >
-      </label>
+      <input
+        id="server-url"
+        class="text-input"
+        type="hidden"
+        value="https://gomoku-online.3337987024.workers.dev"
+      >
 
       <label class="input-group">
         <span class="input-label">房间号</span>
@@ -571,7 +820,11 @@
   </section>
 
   <section id="game-screen" class="screen game-screen">
-    <img class="game-banner" src="board_top.jpeg" alt="顶部装饰">
+    <div class="game-banner-shell">
+      <span class="game-ribbon left"></span>
+      <img class="game-banner" src="board_top.jpeg" alt="顶部装饰">
+      <span class="game-ribbon right"></span>
+    </div>
 
     <header class="game-header">
       <div class="header-left">
@@ -584,9 +837,23 @@
       </div>
     </header>
 
-    <div id="board-shell" class="board-shell">
-      <div id="board-wrap" class="board-wrap">
-        <canvas id="board-canvas"></canvas>
+    <div class="game-stage">
+      <div class="stage-sticker left" aria-hidden="true">
+        <span class="stage-paw"></span>
+        <span class="stage-star"></span>
+        <span class="stage-bone"></span>
+      </div>
+
+      <div id="board-shell" class="board-shell">
+        <div id="board-wrap" class="board-wrap">
+          <canvas id="board-canvas"></canvas>
+        </div>
+      </div>
+
+      <div class="stage-sticker right" aria-hidden="true">
+        <span class="stage-star"></span>
+        <span class="stage-bone"></span>
+        <span class="stage-paw"></span>
       </div>
     </div>
 
@@ -596,6 +863,8 @@
         <span id="turn-text">黑棋回合</span>
       </div>
     </footer>
+
+    <div class="game-floor" aria-hidden="true"></div>
   </section>
 
   <div id="game-menu" class="game-menu panel">
