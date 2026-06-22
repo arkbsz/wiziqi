@@ -3,7 +3,7 @@ const EMPTY = null;
 const BLACK = "black";
 const WHITE = "white";
 const AXIS_LABELS = "ABCDEFGHJKLMNOPQRST".split("");
-const DEFAULT_ONLINE_SERVER = "https://gomoku-online.3337987024.workers.dev";
+const DEFAULT_ONLINE_SERVER = "http://121.36.35.180:4000";
 
 const state = {
   screen: "menu",

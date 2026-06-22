@@ -8,6 +8,10 @@ buildscript {
     }
 }
 
+allprojects {
+    buildDir = file("${rootDir}/../tmp_android_build/${project.name}")
+}
+
 task clean(type: Delete) {
     delete rootProject.buildDir
 }

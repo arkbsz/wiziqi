@@ -1,6 +1,6 @@
 {
   "name": "gomoku",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Gomoku mobile game",
   "main": "server.js",
   "packageManager": "pnpm@10.12.1",

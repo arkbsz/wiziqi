@@ -108,6 +108,6 @@ class AndroidBridge {
 
     @JavascriptInterface
     public String getServerUrl() {
-        return "https://gomoku-online.3337987024.workers.dev";
+        return "http://121.36.35.180:4000";
     }
 }

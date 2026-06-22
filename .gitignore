@@ -1,9 +1,14 @@
 node_modules/
 tmp_apk/
+tmp_android_build/
 android/.gradle/
 android/build/
 android/app/build/
 .wrangler/
 *.apk
+*.zip
 emulator-*.png
 elements.xlsx
+backmenu.png
+tmp_ws_test.js
+1
