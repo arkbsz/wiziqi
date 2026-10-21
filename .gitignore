@@ -12,3 +12,6 @@ elements.xlsx
 backmenu.png
 tmp_ws_test.js
 1
+tmp_*.png
+tmp_*.xml
+artifacts/debug/

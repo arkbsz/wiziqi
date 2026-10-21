@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -71,6 +71,43 @@
 
     .screen.active {
       display: flex;
+    }
+
+    .splash-screen {
+      position: relative;
+      align-items: stretch;
+      justify-content: center;
+      background: #f6eee3;
+      overflow: hidden;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .splash-screen::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: url("startup.png") center / cover no-repeat;
+      transform: scale(1.06);
+      filter: blur(14px) saturate(1.06);
+      opacity: 0.88;
+    }
+
+    .splash-image {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center;
+      user-select: none;
+      -webkit-user-drag: none;
+      filter: drop-shadow(0 14px 36px rgba(58, 34, 18, 0.18));
+      animation: splash-fade-in 760ms ease-out both;
+    }
+
+    .splash-hint {
+      display: none;
     }
 
     .panel {
@@ -747,6 +784,18 @@
       }
     }
 
+    @keyframes splash-fade-in {
+      from {
+        opacity: 0;
+        transform: scale(1.02);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+
     @media (max-width: 390px) {
       .game-banner {
         height: 44px;
@@ -760,7 +809,12 @@
   </style>
 </head>
 <body>
-  <section id="menu-screen" class="screen menu-screen active">
+  <section id="splash-screen" class="screen splash-screen active">
+    <img class="splash-image" src="startup.png" alt="游戏启动界面">
+    <div class="splash-hint">轻触进入</div>
+  </section>
+
+  <section id="menu-screen" class="screen menu-screen">
     <div class="menu-top">
       <img class="menu-cover" src="cover.png" alt="封面">
       <h1 class="menu-title">五子棋</h1>
@@ -875,7 +929,7 @@
 
   <div id="game-over-overlay" class="overlay">
     <div class="overlay-card panel">
-      <img class="result-image" src="获胜.png" alt="结果图">
+      <img class="result-image" src="win.png" alt="结果图">
       <div id="result-title" class="result-title">对局结束</div>
       <div id="result-subtitle" class="result-subtitle">再来一局吧</div>
       <div class="overlay-actions">

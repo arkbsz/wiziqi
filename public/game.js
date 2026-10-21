@@ -1,4 +1,4 @@
-const BOARD_SIZE = 19;
+﻿const BOARD_SIZE = 19;
 const EMPTY = null;
 const BLACK = "black";
 const WHITE = "white";
@@ -23,7 +23,8 @@ const state = {
   blockBoardUntil: 0,
   roomToken: null,
   pollTimer: null,
-  lastRoomVersion: 0
+  lastRoomVersion: 0,
+  lastBoardStoneCount: 0
 };
 
 const ui = {};
@@ -35,6 +36,7 @@ let cellSize = 0;
 let stoneRadius = 0;
 let coordPad = 0;
 let onlineActionTimer = null;
+let audioContext = null;
 
 function initBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(EMPTY));
@@ -44,7 +46,8 @@ function setup() {
   cacheDom();
   bindEvents();
   state.board = initBoard();
-  showScreen("menu");
+  preloadUiAssets();
+  showScreen("splash");
   updateServerInput();
   updateUI();
   unregisterServiceWorkers();
@@ -56,12 +59,14 @@ function cacheDom() {
   ctx = ui.ctx;
 
   ui.screens = {
+    splash: document.getElementById("splash-screen"),
     menu: document.getElementById("menu-screen"),
     online: document.getElementById("online-screen"),
     waiting: document.getElementById("waiting-screen"),
     game: document.getElementById("game-screen")
   };
 
+  ui.splashScreen = document.getElementById("splash-screen");
   ui.localBtn = document.getElementById("local-btn");
   ui.onlineBtn = document.getElementById("online-btn");
   ui.serverUrl = document.getElementById("server-url");
@@ -82,6 +87,7 @@ function cacheDom() {
   ui.restartBtn = document.getElementById("restart-btn");
   ui.quitBtn = document.getElementById("quit-btn");
   ui.overlay = document.getElementById("game-over-overlay");
+  ui.resultImage = document.querySelector(".result-image");
   ui.resultTitle = document.getElementById("result-title");
   ui.resultSubtitle = document.getElementById("result-subtitle");
   ui.overlayRestartBtn = document.getElementById("overlay-restart-btn");
@@ -89,6 +95,7 @@ function cacheDom() {
 }
 
 function bindEvents() {
+  bindTap(ui.splashScreen, enterApp);
   bindTap(ui.localBtn, startLocalGame);
   bindTap(ui.onlineBtn, showOnlineMenu);
   bindTap(ui.createRoomBtn, createRoom);
@@ -200,7 +207,12 @@ function resetGameState() {
   state.winLine = null;
   state.moveHistory = [];
   state.pendingMove = null;
+  state.lastBoardStoneCount = 0;
   closeOverlay();
+}
+
+function enterApp() {
+  showScreen("menu");
 }
 
 function updateUI() {
@@ -549,8 +561,10 @@ function confirmPlacement(row, col) {
   }
 
   state.board[row][col] = state.currentPlayer;
+  state.lastBoardStoneCount += 1;
   state.lastMove = { row, col };
   state.moveHistory.push({ row, col, player: state.currentPlayer });
+  playMoveSound(state.currentPlayer);
 
   const player = state.currentPlayer;
   if (checkWin(row, col, player)) {
@@ -578,6 +592,67 @@ function pulseFeedback() {
   if (navigator.vibrate) {
     navigator.vibrate(12);
   }
+}
+
+function ensureAudioContext() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return null;
+  }
+
+  if (!audioContext) {
+    audioContext = new AudioContextClass();
+  }
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume().catch(() => {});
+  }
+
+  return audioContext;
+}
+
+function playMoveSound(player) {
+  const activeAudioContext = ensureAudioContext();
+  if (!activeAudioContext) {
+    return;
+  }
+
+  const now = activeAudioContext.currentTime;
+  const baseFrequency = player === WHITE ? 720 : 560;
+  const oscillator = activeAudioContext.createOscillator();
+  const overtone = activeAudioContext.createOscillator();
+  const gain = activeAudioContext.createGain();
+
+  oscillator.type = "triangle";
+  oscillator.frequency.setValueAtTime(baseFrequency, now);
+  oscillator.frequency.exponentialRampToValueAtTime(baseFrequency * 0.92, now + 0.08);
+
+  overtone.type = "sine";
+  overtone.frequency.setValueAtTime(baseFrequency * 1.5, now);
+  overtone.frequency.exponentialRampToValueAtTime(baseFrequency * 1.2, now + 0.08);
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.08, now + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+
+  oscillator.connect(gain);
+  overtone.connect(gain);
+  gain.connect(activeAudioContext.destination);
+
+  oscillator.start(now);
+  overtone.start(now);
+  oscillator.stop(now + 0.16);
+  overtone.stop(now + 0.16);
+}
+
+function countPlacedStones(board) {
+  return board.reduce((total, row) => (
+    total + row.reduce((rowTotal, cell) => rowTotal + (cell === EMPTY ? 0 : 1), 0)
+  ), 0);
 }
 
 function checkWin(row, col, player) {
@@ -646,11 +721,38 @@ function showGameOver(winner) {
     ui.resultSubtitle.textContent = "五子连珠，精彩";
   }
 
-  ui.overlay.classList.add("show");
+  openOverlay();
 }
 
 function closeOverlay() {
+  if (!ui.overlay) {
+    return;
+  }
   ui.overlay.classList.remove("show");
+  ui.overlay.style.display = "";
+}
+
+function openOverlay() {
+  if (!ui.overlay) {
+    return;
+  }
+  ui.overlay.style.display = "flex";
+  void ui.overlay.offsetHeight;
+  requestAnimationFrame(() => {
+    ui.overlay.classList.add("show");
+  });
+}
+
+function preloadUiAssets() {
+  if (!ui.resultImage) {
+    return;
+  }
+  const src = ui.resultImage.getAttribute("src");
+  if (!src) {
+    return;
+  }
+  const img = new Image();
+  img.src = src;
 }
 
 function toggleGameMenu() {
@@ -679,6 +781,7 @@ function undoMove() {
     : null;
   state.pendingMove = null;
   state.winLine = null;
+  state.lastBoardStoneCount = Math.max(0, state.lastBoardStoneCount - 1);
   updateUI();
   renderBoard();
 }
@@ -723,6 +826,7 @@ function leaveOnlineFlow() {
   state.isMyTurn = false;
   state.pendingMove = null;
   state.lastRoomVersion = 0;
+  state.lastBoardStoneCount = 0;
   closeOverlay();
   showScreen("menu");
 }
@@ -983,6 +1087,8 @@ async function syncRoom() {
 
   try {
     const room = await fetchRoomState();
+    const previousStoneCount = state.lastBoardStoneCount;
+    const nextStoneCount = countPlacedStones(room.board);
     state.connected = true;
     state.board = room.board;
     state.currentPlayer = room.currentPlayer;
@@ -992,6 +1098,11 @@ async function syncRoom() {
       state.lastRoomVersion = room.updatedAt;
       state.pendingMove = null;
       state.winLine = room.winLine || null;
+      state.lastBoardStoneCount = nextStoneCount;
+      if (state.screen === "game" && nextStoneCount > previousStoneCount) {
+        const lastPlayer = room.currentPlayer === BLACK ? WHITE : BLACK;
+        playMoveSound(lastPlayer);
+      }
       if (room.gameOver) {
         state.gameOver = true;
         renderBoard();
@@ -1005,6 +1116,7 @@ async function syncRoom() {
         renderBoard();
       }
     } else {
+      state.lastBoardStoneCount = nextStoneCount;
       updateUI();
     }
   } catch (error) {

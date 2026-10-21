@@ -149,6 +149,10 @@ java -classpath "gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWra
 
 - [PROJECT_WORK_TREE.md](C:/Users/bsz/Documents/5z7/gomoku/PROJECT_WORK_TREE.md)
 
+下一轮产品路线图见：
+
+- [PRODUCT_ROADMAP.md](C:/Users/bsz/Documents/5z7/gomoku/PRODUCT_ROADMAP.md)
+
 ## 10. 后续建议
 
 后续扩展建议优先级：

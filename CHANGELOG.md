@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog.
 
+## [Unreleased]
+
+### Added
+
+- Added product roadmap document for the next expansion cycle
+
+### Changed
+
+- Updated project work tree with `v1.2.0` planning priorities
+- Linked roadmap document from README for easier planning follow-up
+
 ## [1.1.0] - 2026-06-22
 
 ### Added
